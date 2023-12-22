@@ -37,6 +37,21 @@ interface IKratosXDeposit is IERC721, IAccessControl {
      */
     function burn(uint256 tokenId) external;
 
+    /**
+     * @dev See {IERC721Enumerable-tokenOfOwnerByIndex}.
+     */
+    function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
+
+    /**
+     * @dev See {IERC721Enumerable-totalSupply}.
+     */
+    function totalSupply() external view returns (uint256);
+
+    /**
+     * @dev See {IERC721Enumerable-tokenByIndex}.
+     */
+    function tokenByIndex(uint256 index) external view returns (uint256);
+
     function tokenURI(uint256 tokenId) external view returns (string memory);
 
     function supportsInterface(bytes4 interfaceId) external view returns (bool);
