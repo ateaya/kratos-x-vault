@@ -3,22 +3,22 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/access/IAccessControl.sol";
 
 /**
  * @author  PRC
  * @title   Kratos-X Deposit Certificate NFT Smart Contract
  */
-interface IKratosXDeposit is IERC721, IAccessControl {
-    // the underlying token used for this contract
-    function underlyingToken() external returns (address);
-
+interface IKratosXDeposit is IERC721 {
     struct Deposit {
         uint256 nominal;        // nominal value of the deposit (based on token)
         uint32  timestamp;      // timestamp when the deposit was created
         bool    hasBonus;       // bonus flag for the vault accounting
     }
 
+    /// The underlying token used for this contract
+    function underlyingToken() external returns (IERC20);
+
+    /// The deposit internal data
     function depositData(uint256 tokenId) external returns (Deposit memory);
 
     /**

@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
+import "./interfaces/IAteayaWhitelist.sol";
 import "./interfaces/IKratosXDeposit.sol";
 
 /**
@@ -35,6 +36,7 @@ contract KratosXVault is Pausable, AccessControl
     bytes32 private constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 private constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
+    IAteayaWhitelist public  whitelist;                     // the KYC whitelist
     IKratosXDeposit public   depositNFT;                    // the deposit certificates NFT contract
     IERC20  public immutable underlyingToken;               // the underlying token contract
 
