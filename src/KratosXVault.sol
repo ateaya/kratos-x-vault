@@ -16,24 +16,14 @@ contract KratosXVault is Pausable, AccessControl
 {
     using SafeERC20 for IERC20;
 
-    uint256 constant LockPeriod6M = 180;
-    uint256 constant LockPeriod1Y = 365;
-    uint256 constant LockPeriod2Y = 730;
-    uint256 constant LockPeriod3Y = 1095;
-    uint256 constant LockPeriod4Y = 1460;
-    uint256 constant LockPeriod5Y = 1825;
-
-    enum LockPeriod { SixMonths, OneYear, TwoYears, ThreeYears, FourYears, FiveYears }
-
     error DepositNotFound(uint256 id);
     error NotDepositOwner();
-    error InvalidLockPeriod();
     error NotEnoughSlotsAvailable();
     error NotEnoughAllowance();
     error NotEnoughBalance();
     error NotEnoughFundsToWithdraw();
 
-    event DepositRequested(uint256 id, address from);
+    event DepositRequested(address owner, uint256 amount);
     event DepositApproved(address owner, uint256 id);
     event DepositsApproved(address owner);
     event DepositRejected(address depositor);
@@ -42,58 +32,52 @@ contract KratosXVault is Pausable, AccessControl
     event WithdrawalExecuted(uint256 id, uint256 calculatedAmount);
     event MultipleWithdrawalsExecuted(uint256[] id);
 
-    struct Deposit {
-        uint16 id;                   //  deposit id
-        address owner;               //  the wallet that baught this slot
-        uint32 approveTimestamp;     //  timestamp when the deposit was created
-        LockPeriod lockPeriod;       //  locking period
-        bool hasEarlyAdoptBonus;
-        bool hasExtendPeriodBonus;
+    bytes32 private constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 private constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+
+    IKratosXDeposit public   depositNFT;                    // the deposit certificates NFT contract
+    IERC20  public immutable underlyingToken;               // the underlying token contract
+
+    uint8   public immutable totalSlots = 100;              // the total number deposit slots
+    uint8   public immutable earlyAdopterBonusSlots = 3;    // the amount of slots that will earn the early adopter bonus
+    uint256 public immutable slotUSDValue = 5000;           // the value of each deposit slot in USD
+
+    /**
+     * @notice  Constructor
+     * @param   nft         Address of NFT contract for deposit certificates
+     * @param   token       Address of underlying token of the deposits
+     * @param   admin       Initial admin (owner)
+     * @param   operator    Initial operator (minter/burner)
+     */
+    constructor(address nft, address token, address admin, address operator) Pausable() {
+        depositNFT = nft;
+        underlyingToken = IERC20(token);
+    
+        _grantRole(ADMIN_ROLE, admin);
+        _grantRole(OPERATOR_ROLE, operator);
+
+        _setRoleAdmin(ADMIN_ROLE, ADMIN_ROLE);
+        _setRoleAdmin(OPERATOR_ROLE, ADMIN_ROLE);
     }
-
-    IERC20 immutable externalToken;             //  the address for the external token
-    uint256 constant slotValue = 5000000000;    //  the value of each deposit slot              // TODO: Account for multiple decimals in token
-    uint8 constant slotCount = 100;             //  the deposit slots count
-    uint8 earlyAdoptBonus;                      //  the amount of slots that will earn the early adoption bonus
-    uint32 extendLockPeriodBonusLimit;          //  the timestamp when this bonus will not be available any longer
-
-    uint16 autoIncrementedId;
-
-    Deposit[] public deposits;
-
-    constructor(address token) Pausable() Ownable(_msgSender()) {
-        externalToken = IERC20(token);
-        earlyAdoptBonus = 3;
-        autoIncrementedId = 0;      // TODO: remove, not needed
-        extendLockPeriodBonusLimit = uint32(block.timestamp + 365 days);
-    }
-
 
     ///////////////////////////////////////////////////////
     //  External
     ///////////////////////////////////////////////////////
+
     /**
      * @notice  Retrieve the available deposit slots.
-     * @dev     Returns a list with the available deposit slots.
+     * @dev     Returns the available deposit slots.
      */
-    function getAvailableSlotCount() public view returns(uint256) {
-        return slotCount - deposits.length;
+    function availableSlots() public view returns(uint256) {
+        return totalSlots - depositNFT.totalSupply();
     }
 
     /**
      * @notice  Retrieve the used deposit slots.
      * @dev     Returns a list with the used deposit slots.
      */
-    function getUsedSlots() external view returns(Deposit[] memory) {
-        return deposits;
-    }
-
-    /**
-     * @notice  Retrieve the value of each deposit.
-     * @dev     Returns the necessary value to allocate a slot.
-     */
-    function getSlotValue() external pure returns(uint256) {
-        return slotValue;
+    function usedSlots() external view returns(uint256) {
+        return depositNFT.totalSupply();
     }
 
     /**
@@ -101,17 +85,31 @@ contract KratosXVault is Pausable, AccessControl
      * @dev     Set a specific amount of early adotion deposits available.
      * @param   slots  The number os deposit slots to make available.
      */
-    function setEarlyAdoptSlots(uint8 slots) external onlyOwner whenNotPaused {
-        earlyAdoptBonus = slots;
+    function setEarlyAdopterSlots(uint8 slots) external onlyRole(ADMIN_ROLE) whenNotPaused {
+        earlyAdopterBonusSlots = slots;
     }
 
     /**
-     * @notice  Set the limit for which the lock period extension bonus will be available.
-     * @dev     Set the limit for which the lock period extension bonus will be available.
-     * @param   timestamp  The limit timestamp that the bonus will be available.
+     * @notice  Allows the user to request a deposit. This is because we require
+     * user information in order to create a writen contract for each deposit.
+     * @dev     After the user called ERC20.approve(...), then should call
+     * this function to start the deposit request process.
+     * @param   depositor  The depositor wallet address on the external token.
+     * @param   lockPeriod  The predicted locking period.
      */
-    function setExtendLockPeriodBonus(uint32 timestamp) external onlyOwner whenNotPaused {
-        extendLockPeriodBonusLimit = timestamp;
+    function requestDeposit(address depositor, uint256 amount) external whenNotPaused {
+        if (deposits.length >= totalSlots) revert NotEnoughSlotsAvailable();
+        if (underlyingToken.allowance(depositor, address(this)) < slotUSDValue) revert NotEnoughAllowance();
+        if (underlyingToken.balanceOf(depositor) < slotUSDValue) revert NotEnoughBalance();
+
+        uint16 id = _createDepositId();
+
+        deposits.push(Deposit(id, depositor, uint32(block.timestamp), lockPeriod, _hasEarlyAdoptionBonus(), false));
+
+        // make the value transfer from the depositer account
+        underlyingToken.safeTransferFrom(depositor, owner(), slotUSDValue);
+
+        emit DepositRequested(depositor, amount);
     }
 
     /**
@@ -124,16 +122,16 @@ contract KratosXVault is Pausable, AccessControl
      * @param   lockPeriod  The predicted locking period.
      */
     function approveDeposit(address depositor, LockPeriod lockPeriod) external onlyOwner whenNotPaused {
-        if (deposits.length >= slotCount) revert NotEnoughSlotsAvailable();
-        if (externalToken.allowance(depositor, address(this)) < slotValue) revert NotEnoughAllowance();
-        if (externalToken.balanceOf(depositor) < slotValue) revert NotEnoughBalance();
+        if (deposits.length >= totalSlots) revert NotEnoughSlotsAvailable();
+        if (underlyingToken.allowance(depositor, address(this)) < slotUSDValue) revert NotEnoughAllowance();
+        if (underlyingToken.balanceOf(depositor) < slotUSDValue) revert NotEnoughBalance();
 
         uint16 id = _createDepositId();
 
         deposits.push(Deposit(id, depositor, uint32(block.timestamp), lockPeriod, _hasEarlyAdoptionBonus(), false));
 
         // make the value transfer from the depositer account
-        externalToken.safeTransferFrom(depositor, owner(), slotValue);
+        underlyingToken.safeTransferFrom(depositor, owner(), slotUSDValue);
 
         emit DepositApproved(depositor, id);
     }
@@ -146,8 +144,8 @@ contract KratosXVault is Pausable, AccessControl
      * @param   lockPeriod  The selected locking period.
      */
     function approveDeposits(address depositor, LockPeriod lockPeriod) external onlyOwner whenNotPaused {
-        uint256 allowance = externalToken.allowance(depositor, address(this));
-        uint256 requestedSlots = uint256(allowance / slotValue);
+        uint256 allowance = underlyingToken.allowance(depositor, address(this));
+        uint256 requestedSlots = uint256(allowance / slotUSDValue);
         if (requestedSlots == 0) revert NotEnoughAllowance();
         if (requestedSlots > getAvailableSlotCount()) revert NotEnoughSlotsAvailable();
 
@@ -157,7 +155,7 @@ contract KratosXVault is Pausable, AccessControl
             deposits.push(Deposit(id, depositor, uint32(block.timestamp), lockPeriod, _hasEarlyAdoptionBonus(), false));
         }
 
-        externalToken.safeTransferFrom(depositor, owner(), requestedSlots * slotValue);
+        underlyingToken.safeTransferFrom(depositor, owner(), requestedSlots * slotUSDValue);
 
         emit DepositsApproved(depositor);
     }
@@ -190,7 +188,7 @@ contract KratosXVault is Pausable, AccessControl
         uint256 dayCount = _timestampInDays(block.timestamp + 7 days - deposit.approveTimestamp);
         uint256 estimatedYield = calculateYield(dayCount, deposit.hasEarlyAdoptBonus, deposit.hasExtendPeriodBonus);
 
-        emit WithdrawalRequested(id, slotValue + estimatedYield);
+        emit WithdrawalRequested(id, slotUSDValue + estimatedYield);
     }
 
     /**
@@ -216,14 +214,14 @@ contract KratosXVault is Pausable, AccessControl
         uint256 depositIndex = _findDeposit(depositsInMemory, id);
         Deposit memory deposit = depositsInMemory[depositIndex];
 
-        uint256 calculatedValue = slotValue + calculateYield(_timestampInDays(block.timestamp - deposit.approveTimestamp),
+        uint256 calculatedValue = slotUSDValue + calculateYield(_timestampInDays(block.timestamp - deposit.approveTimestamp),
             deposit.hasEarlyAdoptBonus,
             deposit.hasExtendPeriodBonus);
 
         deposits[depositIndex] = depositsInMemory[depositsInMemory.length - 1];
         deposits.pop();
 
-        externalToken.safeTransferFrom(owner(), deposit.owner, calculatedValue);
+        underlyingToken.safeTransferFrom(owner(), deposit.owner, calculatedValue);
 
         emit WithdrawalExecuted(id, calculatedValue);
     }
@@ -317,7 +315,7 @@ contract KratosXVault is Pausable, AccessControl
             ratePercent = _increment(ratePercent);
         }
 
-        return slotValue * ratePercent * dayCount / (100 * 365);
+        return slotUSDValue * ratePercent * dayCount / (100 * 365);
     }
 
     ///////////////////////////////////////////////////////
@@ -339,8 +337,8 @@ contract KratosXVault is Pausable, AccessControl
     }
 
     function _hasEarlyAdoptionBonus() private returns(bool) {
-        if (earlyAdoptBonus > 0) {
-            unchecked { --earlyAdoptBonus; }
+        if (earlyAdopterBonusSlots > 0) {
+            unchecked { --earlyAdopterBonusSlots; }
             return true;
         }
         return false;
