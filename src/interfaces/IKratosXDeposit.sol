@@ -27,8 +27,9 @@ interface IKratosXDeposit is IERC721 {
      * @param   to      The address of the depositer (soul bound)
      * @param   uri     The uri of the deposit metadata (for UI)
      * @param   data    The deposit internal data
+     * @return  tokenId The token id minted
      */
-    function mint(address to, string calldata uri, Deposit calldata data) external;
+    function mint(address to, string calldata uri, Deposit calldata data) external returns (uint256 tokenId);
 
     /**
      * @notice  This function burns a deposit certificate
