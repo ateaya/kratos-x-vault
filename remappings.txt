@@ -1,1 +1,3 @@
 @openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+ateaya-whitelist/=lib/ateaya-whitelist/src/
+kratos-x-deposit/=lib/kratos-x-deposit/src/

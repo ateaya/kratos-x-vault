@@ -2,18 +2,24 @@
 pragma solidity ^0.8.20;
 
 import {Test, console2} from "forge-std/Test.sol";
+import {AteayaWhitelist} from "ateaya-whitelist/AteayaWhitelist.sol";
+import {KratosXDeposit, DepositData} from "kratos-x-deposit/KratosXDeposit.sol";
 import {KratosXVault} from "../src/KratosXVault.sol";
 import {MockUSDC} from "./mock/MockUSDC.sol";
 
 contract AteayaWhitelistTest is Test {
-    KratosXVault public vault;
+    AteayaWhitelist public whitelist;
+    KratosXDeposit  public deposit;
+    KratosXVault    public vault;
+
+    MockUSDC public token;
 
     address public deployer;
     address public admin;
     address public operator;
     address public user;
 
-    address public token;
+    address public multisig;
 
     function setUp() public {
         string memory mnemonic = "test test test test test test test test test test test junk";
@@ -23,19 +29,24 @@ contract AteayaWhitelistTest is Test {
         operator = vm.addr(privateKey + 1);
         user = vm.addr(privateKey + 2);
 
-        vault = new KratosXVault(token, admin, operator);
+        multisig = vm.addr(privateKey + 10);
+
+        whitelist = new AteayaWhitelist(admin, operator);
         token = new MockUSDC();
+        deposit = new KratosXDeposit(address(token), admin, operator);
+        vault = new KratosXVault(multisig, address(whitelist), address(deposit), address(token), admin, operator);
     }
 
     function test_InitializedCorrectly() public {
-        assertEq(address(deposit.underlyingToken()), token, "invalid token");
-        assertTrue(deposit.hasRole(keccak256("ADMIN_ROLE"), admin), "invalid admin");
-        assertTrue(deposit.hasRole(keccak256("OPERATOR_ROLE"), operator), "invalid admin");
+        assertEq(address(vault.underlyingToken()), address(token), "invalid token");
+        
+        assertTrue(vault.hasRole(keccak256("ADMIN_ROLE"), admin), "invalid admin");
+        assertTrue(vault.hasRole(keccak256("OPERATOR_ROLE"), operator), "invalid admin");
     }
 
     function test_MintDeposit() public {
         vm.prank(operator);
-        deposit.safeMint(user, "", KratosXDeposit.Deposit(5000, uint32(block.timestamp), true));
+        deposit.mint(user, DepositData(5000, uint32(block.timestamp), true));
         assertEq(deposit.balanceOf(user), 1, "user has no token");
         (uint256 nominal, uint32 timestamp, bool hasBonus) = deposit.depositData(0);
         assertEq(nominal, 5000, "wrong nominal value");
@@ -45,17 +56,17 @@ contract AteayaWhitelistTest is Test {
 
     function testFail_AdminCannotMint() public {
         vm.prank(admin);
-        deposit.safeMint(user, "", KratosXDeposit.Deposit(5000, uint32(block.timestamp), true));
+        deposit.mint(user, DepositData(5000, uint32(block.timestamp), true));
     }
 
     function testFail_RegularUserCannotMint() public {
         vm.prank(user);
-        deposit.safeMint(user, "", KratosXDeposit.Deposit(5000, uint32(block.timestamp), true));
+        deposit.mint(user, DepositData(5000, uint32(block.timestamp), true));
     }
 
     function test_BurnDeposit() public {
         vm.startPrank(operator);
-        deposit.safeMint(user, "", KratosXDeposit.Deposit(5000, uint32(block.timestamp), true));
+        deposit.mint(user, DepositData(5000, uint32(block.timestamp), true));
         deposit.burn(0);
         vm.stopPrank();
         assertEq(deposit.balanceOf(user), 0, "user still has a token");
@@ -67,14 +78,14 @@ contract AteayaWhitelistTest is Test {
 
     function testFail_AdminCannotBurn() public {
         vm.prank(operator);
-        deposit.safeMint(user, "", KratosXDeposit.Deposit(5000, uint32(block.timestamp), true));
+        deposit.mint(user, DepositData(5000, uint32(block.timestamp), true));
         vm.prank(admin);
         deposit.burn(0);
     }
 
     function testFail_RegularUserCannotBurn() public {
         vm.prank(operator);
-        deposit.safeMint(user, "", KratosXDeposit.Deposit(5000, uint32(block.timestamp), true));
+        deposit.mint(user, DepositData(5000, uint32(block.timestamp), true));
         vm.prank(user);
         deposit.burn(0);
     }
