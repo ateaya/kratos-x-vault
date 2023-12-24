@@ -6,7 +6,7 @@
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
 [submodule "lib/ateaya-whitelist"]
 	path = lib/ateaya-whitelist
-	url = git@github.com:ateaya/ateaya-whitelist.git
+	url = https://github.com/ateaya/ateaya-whitelist
 [submodule "lib/kratos-x-deposit"]
 	path = lib/kratos-x-deposit
-	url = git@github.com:ateaya/kratos-x-deposit.git
+	url = https://github.com/ateaya/kratos-x-deposit
