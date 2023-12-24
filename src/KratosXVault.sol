@@ -68,16 +68,6 @@ contract KratosXVault is Pausable, AccessControl
         _setRoleAdmin(OPERATOR_ROLE, ADMIN_ROLE);
     }
 
-    /**
-     * @dev Only allow whitelisted depositors
-     */
-    modifier onlyWhitelisted(address depositor) {
-        uint256 hash = uint256(keccak256(abi.encodePacked(depositor)));
-        if (!whitelist.isWhitelisted(hash)) revert DepositorNotWhitelisted(depositor);
-
-        _;
-    }
-
     ///////////////////////////////////////////////////////
     //  External
     ///////////////////////////////////////////////////////
@@ -126,10 +116,13 @@ contract KratosXVault is Pausable, AccessControl
      * because we need user information to create a writen contract for each deposit.
      * @dev     After the user called ERC20.approve(...), then should call
      * this function to make a deposit.
-     * @param   depositor  The depositor wallet address on the external token.
      * @param   slots  The number of slots of the deposit (total amount = slots * slotUSDValue)
      */
-    function deposit(address depositor, uint256 slots) external onlyWhitelisted(depositor) whenNotPaused {
+    function deposit(uint256 slots) external whenNotPaused {
+        address depositor = _msgSender();
+        uint256 hash = uint256(keccak256(abi.encodePacked(depositor)));
+        if (!whitelist.isWhitelisted(hash)) revert DepositorNotWhitelisted(depositor);
+
         uint256 amount = slots * slotUSDValue * underlyingDecimals**10;
 
         // make the value transfer from the depositer account to multisig
