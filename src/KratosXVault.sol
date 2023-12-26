@@ -227,7 +227,6 @@ contract KratosXVault is Pausable, AccessControl
      */
     function executeWithdrawal(uint256 id) public onlyRole(OPERATOR_ROLE) whenNotPaused {
         address depositor = depositNFT.ownerOf(id);
-        if (depositor != _msgSender()) revert NotDepositOwner(_msgSender());
 
         DepositData memory data = depositNFT.depositData(id);
 

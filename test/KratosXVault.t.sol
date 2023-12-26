@@ -7,6 +7,7 @@ import {KratosXDeposit, DepositData} from "kratos-x-deposit/KratosXDeposit.sol";
 import {KratosXVault} from "../src/KratosXVault.sol";
 import {MockUSDC} from "./mock/MockUSDC.sol";
 
+
 contract KratosXVaultTest is Test {
     error InvalidAddress();
     error DepositorNotWhitelisted(address depositor);
@@ -16,6 +17,7 @@ contract KratosXVaultTest is Test {
     error InvalidRefundValue(uint256 usdValue);
 
     error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed);       // from ERC20
+    error ERC721NonexistentToken(uint256 tokenId);       // from ERC721
 
     AteayaWhitelist public whitelist;
     KratosXDeposit  public deposit;
@@ -87,23 +89,23 @@ contract KratosXVaultTest is Test {
         assertEq(calc, yield, "not the same yield");
     }
 
-    function test_Deposit_NoSlots() public {
+    function test_Deposit_ERR_NoSlots() public {
         makeDeposit(user1, 0, true, 0, abi.encodePacked(SlotsNotSupplied.selector));        
     }
 
-    function test_Deposit_NotWhitelisted() public {
+    function test_Deposit_ERR_NotWhitelisted() public {
         makeDeposit(user1, 1, false, 0, abi.encodeWithSelector(DepositorNotWhitelisted.selector, user1));
         makeDeposit(user1, 10, false, 0, abi.encodeWithSelector(DepositorNotWhitelisted.selector, user1));
         makeDeposit(user1, 100, false, 0, abi.encodeWithSelector(DepositorNotWhitelisted.selector, user1));
     }
 
-    function test_Deposit_NotEnoughAllowance() public {
+    function test_Deposit_ERR_NotEnoughAllowance() public {
         makeDeposit(user1, 1, true, wad(vault.slotUSDValue()) - 1, abi.encodeWithSelector(ERC20InsufficientAllowance.selector, address(vault), wad(vault.slotUSDValue()) - 1, wad(vault.slotUSDValue())));
         makeDeposit(user1, 10, true, 10*wad(vault.slotUSDValue()) - 1, abi.encodeWithSelector(ERC20InsufficientAllowance.selector, address(vault), 10*wad(vault.slotUSDValue()) - 1, 10*wad(vault.slotUSDValue())));
         makeDeposit(user1, 100, true, 100*wad(vault.slotUSDValue()) - 1, abi.encodeWithSelector(ERC20InsufficientAllowance.selector, address(vault), 100*wad(vault.slotUSDValue()) - 1, 100*wad(vault.slotUSDValue())));
     }
 
-    function test_Deposit_NotEnoughSlots() public {
+    function test_Deposit_ERR_NotEnoughSlots() public {
         makeDeposit(user1, 101, true, 101*wad(vault.slotUSDValue()), abi.encodeWithSelector(NotEnoughSlotsAvailable.selector));
         makeDeposit(user1, 10, true, 10*wad(vault.slotUSDValue()), "");
         makeDeposit(user1, 100, true, 100*wad(vault.slotUSDValue()), abi.encodeWithSelector(NotEnoughSlotsAvailable.selector));
@@ -114,8 +116,91 @@ contract KratosXVaultTest is Test {
 
         while (slots > vault.availableSlots()) slots /= 2;
         uint256 amount =  slots*wad(vault.slotUSDValue());
-        address user = amount > token.balanceOf(user2) ? user1 : user2;
-        makeDeposit(user, slots, true, amount, "");
+        makeDeposit(user1, slots, true, amount, "");
+    }
+
+    function test_RefundDeposit_ERR_InvalidAmount() public {
+        makeDeposit(user1, 1, true, wad(vault.slotUSDValue()), "");
+        uint256 amount = vault.slotUSDValue() + 1;
+        refundDeposit(user1, 0, amount, wad(amount), abi.encodeWithSelector(InvalidRefundValue.selector, amount));
+    }
+
+    function test_RefundDeposit_ERR_NotEnoughAllowance() public {
+        makeDeposit(user1, 1, true, wad(vault.slotUSDValue()), "");
+        uint256 amount = vault.slotUSDValue();
+        refundDeposit(user1, 0, amount, wad(amount - 1), abi.encodeWithSelector(ERC20InsufficientAllowance.selector, address(vault), wad(amount - 1), wad(amount)));
+    }
+
+    function test_RefundDeposit_ERR_NonExistant() public {
+        uint256 amount = vault.slotUSDValue();
+        refundDeposit(user2, 0, amount, wad(amount), abi.encodeWithSelector(ERC721NonexistentToken.selector, 0));
+    }
+
+    function test_RefundDeposit_OK(uint8 slots) public {
+        if (slots == 0) return;
+
+        while (slots > vault.availableSlots()) slots /= 2;
+        uint256 amount =  slots*wad(vault.slotUSDValue());
+        makeDeposit(user1, slots, true, amount, "");
+        for (uint256 i = slots; i > 0; ) {
+            unchecked {
+                --i;
+            }
+            refundDeposit(user1, i, vault.slotUSDValue(), wad(vault.slotUSDValue()), "");
+        }
+    }
+
+    function test_RequestWithdrawal_ERR_NonExistant() public {
+        uint256 amount = vault.slotUSDValue();
+        requestWithdrawal(user2, 0, abi.encodeWithSelector(ERC721NonexistentToken.selector, 0));
+    }
+
+   function test_RequestWithdrawal_OK(uint8 slots) public {
+        if (slots == 0) return;
+
+        while (slots > vault.availableSlots()) slots /= 2;
+        uint256 amount =  slots*wad(vault.slotUSDValue());
+        makeDeposit(user1, slots, true, amount, "");
+        for (uint256 i = slots; i > 0; ) {
+            unchecked {
+                --i;
+            }
+            requestWithdrawal(user1, i, "");
+        }
+    }
+
+    function test_ExecuteWithdrawal_ERR_NonExistant() public {
+        uint256 amount = wad(vault.slotUSDValue());
+        executeWithdrawal(user2, 0, amount, abi.encodeWithSelector(ERC721NonexistentToken.selector, 0));
+    }
+
+   function test_ExecuteWithdrawal_OK(uint8 slots) public {
+        if (slots == 0) return;
+
+        while (slots > vault.availableSlots()) slots /= 2;
+        uint256 amount =  slots*wad(vault.slotUSDValue());
+        makeDeposit(user1, slots, true, amount, "");
+        for (uint256 i = slots; i > 0; ) {
+            unchecked {
+                --i;
+            }
+            executeWithdrawal(user1, i, wad(vault.slotUSDValue()), "");
+        }
+    }
+
+   function test_ExecuteWithdrawal_OK_5YearsAway(uint8 slots) public {
+        if (slots == 0) return;
+
+        while (slots > vault.availableSlots()) slots /= 2;
+        uint256 amount =  slots*wad(vault.slotUSDValue());
+        makeDeposit(user1, slots, true, amount, "");
+        vm.warp(1825 days);
+        for (uint256 i = slots; i > 0; ) {
+            unchecked {
+                --i;
+            }
+            executeWithdrawal(user1, i, token.balanceOf(multisig), "");
+        }
     }
 
     // Helper to make deopsits
@@ -132,10 +217,54 @@ contract KratosXVaultTest is Test {
             vm.expectRevert(encodedError);
         } else {
             vm.expectEmit(false, true, false, false);
-            emit KratosXVault.DepositCreated(0, user, DepositData(vault.slotUSDValue(), uint32(block.timestamp), false));
+            emit KratosXVault.DepositCreated(0, user, DepositData(vault.slotUSDValue(), uint32(block.timestamp), true));
         }
         vm.prank(user);
         vault.deposit(slots);
+    }
+
+    // Helper to refund a deposit
+    function refundDeposit(address user, uint256 id, uint256 refund, uint256 approve, bytes memory encodedError) internal {
+        if (approve > 0) {
+            vm.prank(multisig);
+            token.approve(address(vault), approve);
+        }
+        if (encodedError.length > 0) {
+            vm.expectRevert(encodedError);
+        } else {
+            vm.expectEmit(true, true, false, false);
+            emit KratosXVault.DepositRefunded(id, user, refund, DepositData(vault.slotUSDValue(), uint32(block.timestamp), true));
+        }
+        vm.prank(operator);
+        vault.refundDeposit(id, refund);
+    }
+
+    // Helper to request a withdrawal
+    function requestWithdrawal(address user, uint256 id, bytes memory encodedError) internal {
+        if (encodedError.length > 0) {
+            vm.expectRevert(encodedError);
+        } else {
+            vm.expectEmit(true, true, false, false);
+            emit KratosXVault.WithdrawalRequested(id, user, DepositData(vault.slotUSDValue(), uint32(block.timestamp), true), 0);
+        }
+        vm.prank(user);
+        vault.requestWithdrawal(id);
+    }
+
+    // Helper to execute a withdrawal
+    function executeWithdrawal(address user, uint256 id, uint256 approve, bytes memory encodedError) internal {
+        if (approve > 0) {
+            vm.prank(multisig);
+            token.approve(address(vault), approve);
+        }
+        if (encodedError.length > 0) {
+            vm.expectRevert(encodedError);
+        } else {
+            vm.expectEmit(true, true, false, false);
+            emit KratosXVault.WithdrawalExecuted(id, user, DepositData(vault.slotUSDValue(), uint32(block.timestamp), true), 0);
+        }
+        vm.prank(operator);
+        vault.executeWithdrawal(id);
     }
 
     // Helper for hashing the addresses for whitelist
