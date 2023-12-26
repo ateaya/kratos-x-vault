@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.23;
 
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 
 import "ateaya-whitelist/IAteayaWhitelist.sol";
 import "kratos-x-deposit/IKratosXDeposit.sol";
+
 
 /**
  * @author  Miguel Tadeu,PRC
@@ -20,14 +21,14 @@ contract KratosXVault is Pausable, AccessControl
     error InvalidAddress();
     error DepositorNotWhitelisted(address depositor);
     error NotDepositOwner(address account);
+    error SlotsNotSupplied();
     error NotEnoughSlotsAvailable();
-    error NotEnoughFundsToWithdraw();
     error InvalidRefundValue(uint256 usdValue);
 
-    event DepositCreated(uint256 id, address depositor, DepositData data);
-    event DepositRefunded(uint256 id, address depositor, uint256 usdRefund, DepositData data);
-    event WithdrawalRequested(uint256 id, address depositor, DepositData data, uint256 usdValueEstimated);
-    event WithdrawalExecuted(uint256 id, address depositor, DepositData data, uint256 usdValue);
+    event DepositCreated(uint256 indexed id, address indexed depositor, DepositData data);
+    event DepositRefunded(uint256 indexed id, address indexed depositor, uint256 usdRefund, DepositData data);
+    event WithdrawalRequested(uint256 indexed id, address indexed depositor, DepositData data, uint256 usdValueEstimated);
+    event WithdrawalExecuted(uint256 indexed id, address indexed depositor, DepositData data, uint256 usdValue);
 
     bytes32 private constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 private constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
@@ -119,18 +120,20 @@ contract KratosXVault is Pausable, AccessControl
      * @param   slots  The number of slots of the deposit (total amount = slots * slotUSDValue)
      */
     function deposit(uint256 slots) external whenNotPaused {
+        if (slots == 0) revert SlotsNotSupplied();
+
         address depositor = _msgSender();
         uint256 hash = uint256(keccak256(abi.encodePacked(depositor)));
         if (!whitelist.isWhitelisted(hash)) revert DepositorNotWhitelisted(depositor);
 
-        uint256 amount = slots * slotUSDValue * underlyingDecimals**10;
+        uint256 amount = slots * slotUSDValue * 10**uint256(underlyingDecimals);
 
         // make the value transfer from the depositer account to multisig
         underlyingToken.safeTransferFrom(depositor, multisig, amount);
 
         if (slots > availableSlots()) revert NotEnoughSlotsAvailable();
 
-        for (uint256 i = 0; i < slots; ) {
+        for (uint256 i; i < slots; ) {
             DepositData memory data = DepositData(slotUSDValue, uint32(block.timestamp), _hasEarlyAdopterBonus());
             uint256 id = depositNFT.mint(depositor, data);
 
@@ -157,7 +160,7 @@ contract KratosXVault is Pausable, AccessControl
 
         // transfer from multisig to refund deposit
         address depositor = depositNFT.ownerOf(id);
-        underlyingToken.safeTransferFrom(multisig, depositor, amount * underlyingDecimals**10);
+        underlyingToken.safeTransferFrom(multisig, depositor, amount * 10**uint256(underlyingDecimals));
 
         DepositData memory data = depositNFT.depositData(id);
 
@@ -231,7 +234,7 @@ contract KratosXVault is Pausable, AccessControl
         depositNFT.burn(id);
 
         uint256 calculatedValue = slotUSDValue + calculateYield(_timestampInDays(block.timestamp - data.timestamp), data.hasBonus);
-        underlyingToken.safeTransferFrom(multisig, depositor, calculatedValue * underlyingDecimals**10);
+        underlyingToken.safeTransferFrom(multisig, depositor, calculatedValue * 10**uint256(underlyingDecimals));
 
         emit WithdrawalExecuted(id, depositor, data, calculatedValue);
     }
