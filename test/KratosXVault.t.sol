@@ -174,6 +174,12 @@ contract KratosXVaultTest is Test {
         executeWithdrawal(user2, 0, amount, abi.encodeWithSelector(ERC721NonexistentToken.selector, 0));
     }
 
+    function test_ExecuteWithdrawal_ERR_NotEnoughAllowance() public {
+        makeDeposit(user1, 1, true, wad(vault.slotUSDValue()), "");
+        uint256 amount = vault.slotUSDValue();
+        executeWithdrawal(user1, 0, wad(amount - 1), abi.encodeWithSelector(ERC20InsufficientAllowance.selector, address(vault), wad(amount - 1), wad(amount)));
+    }
+
    function test_ExecuteWithdrawal_OK(uint8 slots) public {
         if (slots == 0) return;
 
